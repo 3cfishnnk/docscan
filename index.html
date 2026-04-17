@@ -340,6 +340,27 @@
     background: rgba(10,10,10,0.6);
     backdrop-filter: blur(10px);
   }
+  .corner-handle.dragging::before {
+    inset: 4px;
+    border-width: 4px;
+    box-shadow: 0 0 12px rgba(255, 214, 10, 0.8);
+  }
+  #loupe {
+    position: absolute;
+    top: calc(var(--safe-top) + 16px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    border: 3px solid var(--accent);
+    background: #000;
+    overflow: hidden;
+    display: none;
+    z-index: 30;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+  }
+  #loupe.active { display: block; }
+  #loupe canvas { width: 100%; height: 100%; display: block; }
   .crop-bottombar {
     position: absolute;
     bottom: 0; left: 0; right: 0;
@@ -890,6 +911,7 @@
   <!-- ============ CROP EDITOR VIEW ============ -->
   <section class="view" id="view-crop">
     <div class="crop-hint" data-i18n="dragCorners">DRAG CORNERS TO ADJUST</div>
+    <div id="loupe"><canvas></canvas></div>
 
     <div id="crop-container">
       <canvas id="crop-canvas"></canvas>
@@ -1051,6 +1073,8 @@ const state = {
   lang: 'zh',
   edgeDetectInterval: null,
   lastDetectedCorners: null,
+  smoothedCorners: null,    // EMA-smoothed corners in scaled-source coords
+  missCount: 0,             // consecutive frames without detection
 };
 
 // ---------- I18N ----------
@@ -1254,16 +1278,91 @@ function startEdgeDetection() {
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
       drawViewfinderBrackets(ctx, overlay.width, overlay.height);
+
       if (corners) {
-        state.lastDetectedCorners = corners;
-        drawCornersOnOverlay(ctx, corners, w, h, overlay.width, overlay.height);
+        // Smooth across frames to reduce jitter (EMA)
+        const prev = state.smoothedCorners;
+        const dist = prev ? cornersDistance(prev, corners) : Infinity;
+        const frameDiag = Math.hypot(w, h);
+        if (prev && dist < frameDiag * 0.18) {
+          // Same document — blend
+          const a = 0.35;
+          state.smoothedCorners = corners.map((c, i) => ({
+            x: prev[i].x * (1 - a) + c.x * a,
+            y: prev[i].y * (1 - a) + c.y * a,
+          }));
+        } else {
+          // New / large jump — snap
+          state.smoothedCorners = corners;
+        }
+        state.lastDetectedCorners = state.smoothedCorners;
+        state.missCount = 0;
+        drawCornersOnOverlay(ctx, state.smoothedCorners, w, h, overlay.width, overlay.height);
         setScanStatus('locked');
       } else {
-        state.lastDetectedCorners = null;
-        setScanStatus('searching');
+        state.missCount++;
+        // Persist last-known corners for a few frames to avoid flicker
+        if (state.smoothedCorners && state.missCount < 6) {
+          drawCornersOnOverlay(ctx, state.smoothedCorners, w, h, overlay.width, overlay.height);
+          setScanStatus('locked');
+        } else {
+          state.smoothedCorners = null;
+          state.lastDetectedCorners = null;
+          setScanStatus('searching');
+        }
       }
     } catch (e) { console.warn('detect loop error', e); }
   }, 250);
+}
+
+function cornersDistance(a, b) {
+  let s = 0;
+  for (let i = 0; i < 4; i++) s += Math.hypot(a[i].x - b[i].x, a[i].y - b[i].y);
+  return s / 4;
+}
+
+// Score a quad: higher = more document-like (rectangular, large, balanced)
+function scoreQuad(ordered, frameArea) {
+  const sides = [];
+  for (let i = 0; i < 4; i++) {
+    const a = ordered[i], b = ordered[(i+1)%4];
+    sides.push(Math.hypot(b.x - a.x, b.y - a.y));
+  }
+  const minSide = Math.min(...sides);
+  const maxSide = Math.max(...sides);
+  if (minSide < 20) return -1;
+  const sideRatio = minSide / maxSide;
+  if (sideRatio < 0.25) return -1; // too thin
+
+  // Polygon area (shoelace)
+  let area = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = ordered[i], b = ordered[(i+1)%4];
+    area += a.x * b.y - b.x * a.y;
+  }
+  area = Math.abs(area) / 2;
+  if (area < frameArea * 0.05) return -1;
+  if (area > frameArea * 0.99) return -1;
+
+  // Average angle deviation from 90°
+  let angleDev = 0;
+  for (let i = 0; i < 4; i++) {
+    const p = ordered[i];
+    const a = ordered[(i+3)%4];
+    const c = ordered[(i+1)%4];
+    const v1x = a.x - p.x, v1y = a.y - p.y;
+    const v2x = c.x - p.x, v2y = c.y - p.y;
+    const cos = (v1x*v2x + v1y*v2y) / (Math.hypot(v1x,v1y) * Math.hypot(v2x,v2y) + 1e-6);
+    const ang = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+    angleDev += Math.abs(ang - 90);
+  }
+  angleDev /= 4;
+  if (angleDev > 35) return -1;
+
+  // Combined score: bigger area, closer to rectangular, more balanced sides
+  const angleScore = 1 - angleDev / 45;        // 0..1
+  const balanceScore = 0.4 + sideRatio * 0.6;  // 0.4..1
+  return area * angleScore * balanceScore;
 }
 
 function detectDocumentCorners(src) {
@@ -1279,12 +1378,10 @@ function detectDocumentCorners(src) {
     cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
 
     const frameArea = src.rows * src.cols;
-    const minArea = frameArea * 0.06; // doc covers ≥6% of frame
+    const thresholdPairs = [[50, 150], [30, 100], [75, 200]];
 
-    // Try several Canny threshold pairs — handles low-contrast scenes
-    const thresholdPairs = [[50, 150], [30, 100], [75, 200], [20, 60]];
-    let best = null;
-    let bestArea = minArea;
+    let bestPts = null;
+    let bestScore = 0;
 
     for (const [lo, hi] of thresholdPairs) {
       cv.Canny(blur, edges, lo, hi);
@@ -1294,31 +1391,26 @@ function detectDocumentCorners(src) {
       for (let i = 0; i < contours.size(); i++) {
         const cnt = contours.get(i);
         const peri = cv.arcLength(cnt, true);
-        // Try multiple epsilon values for approximation
+        // Try multiple epsilons; pick best 4-vertex approximation
         for (const eps of [0.02, 0.03, 0.04, 0.05]) {
           const approx = new cv.Mat();
           cv.approxPolyDP(cnt, approx, eps * peri, true);
           if (approx.rows === 4) {
-            const area = Math.abs(cv.contourArea(approx));
-            if (area > bestArea && area < frameArea * 0.98) {
-              bestArea = area;
-              if (best) best.delete();
-              best = approx;
-              break;
-            }
+            const pts = [];
+            for (let k = 0; k < 4; k++) pts.push({ x: approx.data32S[k*2], y: approx.data32S[k*2+1] });
+            const ordered = orderCorners(pts);
+            const sc = scoreQuad(ordered, frameArea);
+            if (sc > bestScore) { bestScore = sc; bestPts = ordered; }
+            approx.delete();
+            break;
           }
           approx.delete();
         }
         cnt.delete();
       }
-      if (best && bestArea > frameArea * 0.4) break; // good enough, stop
     }
 
-    if (!best) return null;
-    const pts = [];
-    for (let i = 0; i < 4; i++) pts.push({ x: best.data32S[i*2], y: best.data32S[i*2+1] });
-    best.delete();
-    return orderCorners(pts);
+    return bestPts;
   } finally {
     gray.delete(); blur.delete(); edges.delete();
     contours.delete(); hier.delete(); M.delete();
@@ -1541,14 +1633,53 @@ function renderCropEditor() {
   });
 }
 
-// Drag handles
+// Drag handles + magnifier loupe
 let dragIdx = -1;
+
+const LOUPE_SIZE = 140;
+const LOUPE_ZOOM = 2.5;
+
+function showLoupe() { document.getElementById('loupe').classList.add('active'); }
+function hideLoupe() { document.getElementById('loupe').classList.remove('active'); }
+
+function updateLoupe(srcX, srcY) {
+  const loupe = document.getElementById('loupe');
+  const canvas = loupe.querySelector('canvas');
+  if (canvas.width !== LOUPE_SIZE) { canvas.width = LOUPE_SIZE; canvas.height = LOUPE_SIZE; }
+  const ctx = canvas.getContext('2d');
+  const src = state.currentEdit.sourceCanvas;
+  const captureSize = LOUPE_SIZE / LOUPE_ZOOM;
+
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, LOUPE_SIZE, LOUPE_SIZE);
+  ctx.drawImage(
+    src,
+    srcX - captureSize/2, srcY - captureSize/2, captureSize, captureSize,
+    0, 0, LOUPE_SIZE, LOUPE_SIZE
+  );
+
+  // Crosshair + center ring
+  ctx.strokeStyle = '#ffd60a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(LOUPE_SIZE/2, 0); ctx.lineTo(LOUPE_SIZE/2, LOUPE_SIZE);
+  ctx.moveTo(0, LOUPE_SIZE/2); ctx.lineTo(LOUPE_SIZE, LOUPE_SIZE/2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(LOUPE_SIZE/2, LOUPE_SIZE/2, 10, 0, Math.PI*2);
+  ctx.stroke();
+}
+
 function setupHandleDrag() {
   document.querySelectorAll('.corner-handle').forEach(h => {
     h.addEventListener('pointerdown', e => {
       e.preventDefault();
       dragIdx = parseInt(h.dataset.corner);
       h.setPointerCapture(e.pointerId);
+      h.classList.add('dragging');
+      const c = state.currentEdit.corners[dragIdx];
+      updateLoupe(c.x, c.y);
+      showLoupe();
     });
     h.addEventListener('pointermove', e => {
       if (dragIdx !== parseInt(h.dataset.corner)) return;
@@ -1557,14 +1688,21 @@ function setupHandleDrag() {
       const x = (e.clientX - rect.left) / state.currentEdit.displayRatio;
       const y = (e.clientY - rect.top) / state.currentEdit.displayRatio;
       const src = state.currentEdit.sourceCanvas;
-      state.currentEdit.corners[dragIdx] = {
-        x: Math.max(0, Math.min(src.width, x)),
-        y: Math.max(0, Math.min(src.height, y)),
-      };
+      const cx = Math.max(0, Math.min(src.width, x));
+      const cy = Math.max(0, Math.min(src.height, y));
+      state.currentEdit.corners[dragIdx] = { x: cx, y: cy };
       renderCropEditor();
+      updateLoupe(cx, cy);
     });
-    h.addEventListener('pointerup', e => { dragIdx = -1; });
-    h.addEventListener('pointercancel', e => { dragIdx = -1; });
+    const endDrag = () => {
+      if (dragIdx !== -1) {
+        document.querySelectorAll('.corner-handle').forEach(x => x.classList.remove('dragging'));
+        hideLoupe();
+      }
+      dragIdx = -1;
+    };
+    h.addEventListener('pointerup', endDrag);
+    h.addEventListener('pointercancel', endDrag);
   });
 }
 setupHandleDrag();
