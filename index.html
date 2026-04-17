@@ -1797,6 +1797,48 @@ document.getElementById('btn-crop-confirm').addEventListener('click', async () =
   }
 });
 
+// Recover the true width/height aspect ratio of a rectangle from its perspective
+// projection. Based on Zhang & He, "Whiteboard Scanning and Image Enhancement"
+// (Microsoft Research, 2007). Assumes principal point at image center.
+// corners: [tl, tr, br, bl] in image pixel coords. imgW/imgH: full image size.
+// Returns width/height ratio (>0) or null if degenerate.
+function recoverRectAspect(corners, imgW, imgH) {
+  const cx = imgW / 2, cy = imgH / 2;
+  // Center coords; z=1 (we recover focal length from the geometry)
+  const m = corners.map(p => [p.x - cx, p.y - cy, 1]);
+  const [m1, m2, m3, m4] = m;
+  const cross = (a, b) => [
+    a[1]*b[2] - a[2]*b[1],
+    a[2]*b[0] - a[0]*b[2],
+    a[0]*b[1] - a[1]*b[0],
+  ];
+  const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+
+  const c43 = cross(m4, m3);
+  const c42 = cross(m4, m2);
+  const k2_den = dot(m2, c43);
+  const k3_den = dot(m3, c42);
+  if (Math.abs(k2_den) < 1e-9 || Math.abs(k3_den) < 1e-9) return null;
+  const k2 = dot(m1, c43) / k2_den;
+  const k3 = dot(m1, c42) / k3_den;
+
+  const n2 = [k2*m2[0] - m1[0], k2*m2[1] - m1[1], k2*m2[2] - m1[2]];
+  const n3 = [k3*m3[0] - m1[0], k3*m3[1] - m1[1], k3*m3[2] - m1[2]];
+
+  // f² (focal length squared) recovered from orthogonality constraint
+  if (Math.abs(n2[2]) < 1e-9 || Math.abs(n3[2]) < 1e-9) return null;
+  const f_sq = -(n2[0]*n3[0] + n2[1]*n3[1]) / (n2[2]*n3[2]);
+  if (!isFinite(f_sq) || f_sq <= 0) return null;
+
+  // aspect² (width/height squared)
+  const w_sq = n2[0]*n2[0] + n2[1]*n2[1] + f_sq*n2[2]*n2[2];
+  const h_sq = n3[0]*n3[0] + n3[1]*n3[1] + f_sq*n3[2]*n3[2];
+  if (h_sq <= 0) return null;
+  const ar = Math.sqrt(w_sq / h_sq);
+  if (!isFinite(ar) || ar < 0.2 || ar > 5) return null;
+  return ar;
+}
+
 // ---------- PERSPECTIVE WARP ----------
 function warpPerspective(sourceCanvas, corners) {
   if (!state.cvReady) {
@@ -1806,24 +1848,53 @@ function warpPerspective(sourceCanvas, corners) {
   const src = cv.imread(sourceCanvas);
   const ordered = orderCorners(corners.map(c => ({ x: c.x, y: c.y })));
 
-  // Compute target dimensions from side lengths
+  // Measured side lengths from the perspective-projected quad
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const widthTop = dist(ordered[0], ordered[1]);
   const widthBottom = dist(ordered[3], ordered[2]);
   const heightLeft = dist(ordered[0], ordered[3]);
   const heightRight = dist(ordered[1], ordered[2]);
-  let destW = Math.max(widthTop, widthBottom);
-  let destH = Math.max(heightLeft, heightRight);
+  const measuredW = Math.max(widthTop, widthBottom);
+  const measuredH = Math.max(heightLeft, heightRight);
 
-  // Snap to standard paper aspect if very close (corrects minor corner errors)
-  const aspect = Math.max(destW, destH) / Math.min(destW, destH);
-  const portrait = destH >= destW;
-  let target = null;
-  if (Math.abs(aspect - 1.414) < 0.08) target = 1.414;       // A4
-  else if (Math.abs(aspect - 1.294) < 0.06) target = 1.294;  // Letter
-  if (target) {
-    if (portrait) destH = destW * target;
-    else destW = destH * target;
+  // Recover TRUE aspect ratio from perspective geometry (handles compression)
+  const trueAspect = recoverRectAspect(ordered, sourceCanvas.width, sourceCanvas.height);
+
+  let destW, destH;
+  if (trueAspect && isFinite(trueAspect)) {
+    // Snap to standard paper aspects when close
+    let ar = trueAspect; // width/height
+    const inv = 1 / ar;
+    const A4 = 1 / 1.414, LETTER = 1 / 1.294;
+    if (Math.abs(ar - 1.414) < 0.18) ar = 1.414;
+    else if (Math.abs(inv - 1.414) < 0.18) ar = A4;
+    else if (Math.abs(ar - 1.294) < 0.10) ar = 1.294;
+    else if (Math.abs(inv - 1.294) < 0.10) ar = LETTER;
+
+    // Use the longer measured side as the high-fidelity dimension; compute the
+    // other from the recovered aspect so we never undersize either axis.
+    if (ar >= 1) {
+      // landscape: width is longer
+      destW = Math.max(measuredW, measuredH);
+      destH = destW / ar;
+    } else {
+      // portrait: height is longer
+      destH = Math.max(measuredW, measuredH);
+      destW = destH * ar;
+    }
+  } else {
+    destW = measuredW;
+    destH = measuredH;
+    // Fallback snap based on measured aspect
+    const aspect = Math.max(destW, destH) / Math.min(destW, destH);
+    const portrait = destH >= destW;
+    let target = null;
+    if (Math.abs(aspect - 1.414) < 0.20) target = 1.414;
+    else if (Math.abs(aspect - 1.294) < 0.10) target = 1.294;
+    if (target) {
+      if (portrait) destH = destW * target;
+      else destW = destH * target;
+    }
   }
 
   const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
