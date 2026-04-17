@@ -1,0 +1,2030 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0a0a">
+<title>Document Scanner · 文件掃描</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady()"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg: #0a0a0a;
+    --bg-raised: #161616;
+    --bg-elevated: #1f1f1f;
+    --border: #2a2a2a;
+    --border-strong: #3a3a3a;
+    --text: #f5f5f5;
+    --text-dim: #a0a0a0;
+    --text-subtle: #707070;
+    --accent: #ffd60a;
+    --accent-soft: rgba(255, 214, 10, 0.12);
+    --danger: #ff453a;
+    --success: #30d158;
+    --safe-top: env(safe-area-inset-top);
+    --safe-bottom: env(safe-area-inset-bottom);
+  }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  button { font-family: inherit; cursor: pointer; background: none; border: none; color: inherit; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .serif { font-family: 'Instrument Serif', serif; font-style: italic; }
+
+  /* ============ APP STRUCTURE ============ */
+  #app {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Views switch */
+  .view {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    background: var(--bg);
+  }
+  .view.active { display: flex; }
+
+  /* ============ TOP BAR ============ */
+  .topbar {
+    padding: calc(var(--safe-top) + 14px) 16px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 20;
+    background: linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0) 100%);
+    position: relative;
+  }
+  .topbar.solid { background: var(--bg); border-bottom: 1px solid var(--border); }
+  .topbar .title {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 22px;
+    letter-spacing: 0.5px;
+  }
+  .icon-btn {
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    color: var(--text);
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    transition: transform 0.15s, background 0.15s;
+  }
+  .icon-btn:active { transform: scale(0.92); background: rgba(255,255,255,0.18); }
+  .icon-btn svg { width: 20px; height: 20px; }
+
+  /* ============ LANDING / WELCOME ============ */
+  #view-welcome {
+    padding: calc(var(--safe-top) + 40px) 24px calc(var(--safe-bottom) + 32px);
+    background: radial-gradient(120% 80% at 50% 0%, #1a1a1a 0%, #0a0a0a 60%);
+    justify-content: space-between;
+  }
+  .hero-mark {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+  }
+  .hero-title {
+    font-family: 'Instrument Serif', serif;
+    font-size: clamp(48px, 14vw, 72px);
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    margin: 16px 0 20px;
+  }
+  .hero-title em { font-style: italic; color: var(--accent); }
+  .hero-subtitle {
+    font-size: 15px;
+    color: var(--text-dim);
+    line-height: 1.55;
+    max-width: 340px;
+  }
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 32px 0;
+  }
+  .feature-chip {
+    border: 1px solid var(--border);
+    background: var(--bg-raised);
+    padding: 14px 12px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .feature-chip svg { width: 16px; height: 16px; color: var(--accent); flex-shrink: 0; }
+  .cta-primary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    padding: 20px;
+    background: var(--accent);
+    color: #0a0a0a;
+    font-weight: 600;
+    font-size: 17px;
+    border-radius: 16px;
+    transition: transform 0.15s;
+  }
+  .cta-primary:active { transform: scale(0.97); }
+  .cta-primary svg { width: 22px; height: 22px; }
+  .cta-sub {
+    text-align: center;
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--text-subtle);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px;
+  }
+
+  /* ============ CAMERA VIEW ============ */
+  #view-camera { background: #000; }
+  #video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 1;
+  }
+  #edge-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .camera-topbar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 10;
+    padding: calc(var(--safe-top) + 14px) 16px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(180deg, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0) 100%);
+  }
+  .capture-count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    padding: 8px 14px;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 20px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+  .capture-count span { color: var(--accent); }
+  .camera-controls {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    z-index: 10;
+    padding: 24px 24px calc(var(--safe-bottom) + 24px);
+    background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.7) 60%);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .shutter {
+    width: 78px; height: 78px;
+    border-radius: 50%;
+    border: 4px solid #fff;
+    background: transparent;
+    padding: 4px;
+    position: relative;
+    transition: transform 0.1s;
+  }
+  .shutter::after {
+    content: '';
+    display: block;
+    width: 100%; height: 100%;
+    background: #fff;
+    border-radius: 50%;
+    transition: background 0.1s, transform 0.1s;
+  }
+  .shutter:active::after { background: var(--accent); transform: scale(0.9); }
+  .camera-side-btn {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.1);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    color: #fff;
+    transition: transform 0.15s;
+  }
+  .camera-side-btn:active { transform: scale(0.9); }
+  .camera-side-btn svg { width: 22px; height: 22px; }
+  .camera-side-btn.has-thumb { padding: 0; overflow: hidden; border: 2px solid var(--accent); }
+  .camera-side-btn.has-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .mode-pill {
+    position: absolute;
+    top: calc(var(--safe-top) + 68px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: flex;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 20px;
+    padding: 3px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+  .mode-pill button {
+    padding: 7px 16px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.6);
+    border-radius: 16px;
+    transition: all 0.2s;
+  }
+  .mode-pill button.active {
+    background: var(--accent);
+    color: #0a0a0a;
+    font-weight: 600;
+  }
+  .flash-overlay {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    z-index: 5;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .flash-overlay.active { opacity: 1; transition: opacity 0.05s; }
+
+  /* ============ CROP EDITOR ============ */
+  #view-crop { background: #000; }
+  #crop-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px 180px;
+  }
+  #crop-canvas {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+  }
+  .corner-handle {
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    margin-left: -16px;
+    margin-top: -16px;
+    z-index: 5;
+    cursor: grab;
+    touch-action: none;
+  }
+  .corner-handle::before {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border: 3px solid var(--accent);
+    border-radius: 50%;
+    background: rgba(10,10,10,0.6);
+    backdrop-filter: blur(10px);
+  }
+  .crop-bottombar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 16px 16px calc(var(--safe-bottom) + 16px);
+    background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.9) 50%);
+    display: flex;
+    gap: 12px;
+    z-index: 20;
+  }
+  .crop-bottombar button {
+    flex: 1;
+    padding: 14px;
+    border-radius: 12px;
+    font-weight: 500;
+    font-size: 15px;
+    transition: transform 0.1s;
+  }
+  .crop-bottombar button:active { transform: scale(0.97); }
+  .btn-ghost { background: var(--bg-raised); color: var(--text); border: 1px solid var(--border); }
+  .btn-accent { background: var(--accent); color: #0a0a0a; font-weight: 600; }
+  .crop-hint {
+    position: absolute;
+    top: calc(var(--safe-top) + 70px);
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-subtle);
+    padding: 6px 12px;
+    background: rgba(0,0,0,0.6);
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+  }
+
+  /* ============ GALLERY / REVIEW ============ */
+  #view-gallery .topbar { background: var(--bg); border-bottom: 1px solid var(--border); }
+  .gallery-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .gallery-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 20px;
+    padding: 0 4px;
+  }
+  .gallery-header .count-big {
+    font-family: 'Instrument Serif', serif;
+    font-size: 48px;
+    line-height: 1;
+  }
+  .gallery-header .count-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-subtle);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .gallery-item {
+    aspect-ratio: 3/4;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .gallery-item:active { transform: scale(0.97); }
+  .gallery-item img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .gallery-item .page-num {
+    position: absolute;
+    top: 8px; left: 8px;
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    backdrop-filter: blur(10px);
+  }
+  .gallery-item .delete-btn {
+    position: absolute;
+    top: 8px; right: 8px;
+    width: 28px; height: 28px;
+    background: rgba(0,0,0,0.7);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(10px);
+  }
+  .gallery-item .delete-btn svg { width: 14px; height: 14px; color: #fff; }
+
+  .gallery-footer {
+    padding: 16px 16px calc(var(--safe-bottom) + 16px);
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+    display: flex;
+    gap: 10px;
+  }
+  .gallery-footer button { flex: 1; padding: 14px; border-radius: 12px; font-size: 14px; font-weight: 500; }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    text-align: center;
+  }
+  .empty-state-icon {
+    width: 80px; height: 80px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 20px;
+  }
+  .empty-state-icon svg { width: 36px; height: 36px; color: var(--text-subtle); }
+  .empty-state h3 {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 28px;
+    margin-bottom: 8px;
+  }
+  .empty-state p {
+    color: var(--text-dim);
+    font-size: 14px;
+    max-width: 260px;
+  }
+
+  /* ============ EDIT PAGE ============ */
+  #view-edit { background: var(--bg); }
+  .edit-preview {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: #000;
+    overflow: hidden;
+  }
+  .edit-preview canvas, .edit-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  .edit-panel {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 16px 16px calc(var(--safe-bottom) + 16px);
+  }
+  .edit-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 18px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  .edit-tabs::-webkit-scrollbar { display: none; }
+  .edit-tab {
+    padding: 8px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .edit-tab.active {
+    background: var(--accent);
+    color: #0a0a0a;
+    border-color: var(--accent);
+  }
+
+  .filter-row {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    margin-bottom: 6px;
+    padding: 2px;
+  }
+  .filter-row::-webkit-scrollbar { display: none; }
+  .filter-swatch {
+    flex-shrink: 0;
+    width: 72px;
+    text-align: center;
+  }
+  .filter-swatch-thumb {
+    width: 64px; height: 64px;
+    border-radius: 10px;
+    border: 2px solid var(--border);
+    background: var(--bg-raised);
+    margin: 0 auto 6px;
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Instrument Serif', serif;
+    font-size: 24px;
+    color: var(--text-subtle);
+    transition: all 0.15s;
+  }
+  .filter-swatch.active .filter-swatch-thumb {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .filter-swatch-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .slider-group { margin-bottom: 14px; }
+  .slider-group label {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .slider-group label .val { color: var(--accent); }
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--bg-elevated);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px; height: 22px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(255, 214, 10, 0.3);
+  }
+
+  .ratio-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  .ratio-btn {
+    padding: 10px 4px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    text-align: center;
+    background: var(--bg-raised);
+    transition: all 0.15s;
+  }
+  .ratio-btn.active { border-color: var(--accent); background: var(--accent-soft); }
+  .ratio-btn .r-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text); }
+  .ratio-btn .r-sub { font-size: 9px; color: var(--text-subtle); margin-top: 2px; }
+
+  .edit-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .edit-actions button {
+    flex: 1;
+    padding: 14px;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 500;
+  }
+
+  /* ============ EXPORT SHEET ============ */
+  .sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  .sheet-backdrop.active { opacity: 1; pointer-events: all; }
+  .sheet {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: var(--bg-raised);
+    border-radius: 24px 24px 0 0;
+    padding: 8px 20px calc(var(--safe-bottom) + 20px);
+    z-index: 101;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    border-top: 1px solid var(--border);
+  }
+  .sheet.active { transform: translateY(0); }
+  .sheet-handle {
+    width: 40px; height: 4px;
+    background: var(--border-strong);
+    border-radius: 2px;
+    margin: 0 auto 16px;
+  }
+  .sheet h3 {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 28px;
+    margin-bottom: 4px;
+  }
+  .sheet-sub {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+  }
+  .export-opts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .export-opt {
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    text-align: left;
+    background: var(--bg);
+    transition: all 0.15s;
+  }
+  .export-opt.active { border-color: var(--accent); background: var(--accent-soft); }
+  .export-opt .fmt-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 1px;
+  }
+  .export-opt.active .fmt-label { color: var(--accent); }
+  .export-opt .fmt-desc {
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-top: 4px;
+  }
+  .export-btn {
+    width: 100%;
+    padding: 16px;
+    background: var(--accent);
+    color: #0a0a0a;
+    font-weight: 600;
+    font-size: 16px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+  .export-btn svg { width: 20px; height: 20px; }
+
+  /* ============ TOAST ============ */
+  .toast {
+    position: fixed;
+    top: calc(var(--safe-top) + 16px);
+    left: 50%;
+    transform: translate(-50%, -120%);
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 20px;
+    border-radius: 12px;
+    font-size: 13px;
+    z-index: 200;
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    max-width: 90%;
+    text-align: center;
+  }
+  .toast.show { transform: translate(-50%, 0); }
+  .toast.success { border-color: var(--success); }
+  .toast.error { border-color: var(--danger); }
+
+  /* ============ LOADING ============ */
+  .loader-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 300;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .loader-overlay.active { display: flex; }
+  .spinner {
+    width: 48px; height: 48px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loader-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* ============ LANG TOGGLE ============ */
+  .lang-toggle {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 12px;
+  }
+  .lang-toggle button {
+    padding: 6px 10px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    color: var(--text-dim);
+    border-radius: 10px;
+  }
+  .lang-toggle button.active {
+    background: rgba(255,255,255,0.15);
+    color: var(--text);
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ WELCOME VIEW ============ -->
+  <section class="view active" id="view-welcome">
+    <div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div class="hero-mark">DocScan · v1.0</div>
+        <div class="lang-toggle">
+          <button data-lang="zh" class="active">繁中</button>
+          <button data-lang="en">EN</button>
+        </div>
+      </div>
+      <h1 class="hero-title">
+        <span data-i18n="hero1">掃描</span><br>
+        <em data-i18n="hero2">萬物</em>
+      </h1>
+      <p class="hero-subtitle" data-i18n="heroSub">使用手機高畫質鏡頭自動偵測文件邊緣、校正透視、調整光線,一鍵輸出 PDF 或高解析圖片。</p>
+
+      <div class="feature-grid">
+        <div class="feature-chip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9l10-6 10 6-10 6-10-6z"/><path d="M2 15l10 6 10-6"/></svg>
+          <span data-i18n="f1">自動偵測邊緣</span>
+        </div>
+        <div class="feature-chip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M9 9h6v6H9z"/></svg>
+          <span data-i18n="f2">透視校正</span>
+        </div>
+        <div class="feature-chip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+          <span data-i18n="f3">亮度對比調整</span>
+        </div>
+        <div class="feature-chip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span data-i18n="f4">PDF 多頁輸出</span>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <button class="cta-primary" id="btn-start-scan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <span data-i18n="startScan">開始掃描</span>
+      </button>
+      <div class="cta-sub" id="engine-status">INITIALIZING ENGINE...</div>
+    </div>
+  </section>
+
+  <!-- ============ CAMERA VIEW ============ -->
+  <section class="view" id="view-camera">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="edge-overlay"></canvas>
+    <div class="flash-overlay" id="flash-overlay"></div>
+
+    <div class="camera-topbar">
+      <button class="icon-btn" id="btn-camera-back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
+      <div class="capture-count" id="capture-count"><span>0</span> <span data-i18n="pages">頁</span></div>
+      <button class="icon-btn" id="btn-toggle-flash">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </button>
+    </div>
+
+    <div class="mode-pill">
+      <button data-mode="auto" class="active" data-i18n="modeAuto">AUTO</button>
+      <button data-mode="manual" data-i18n="modeManual">MANUAL</button>
+    </div>
+
+    <div class="camera-controls">
+      <button class="camera-side-btn" id="btn-gallery-preview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      </button>
+      <button class="shutter" id="btn-shutter"></button>
+      <button class="camera-side-btn" id="btn-done">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <!-- ============ CROP EDITOR VIEW ============ -->
+  <section class="view" id="view-crop">
+    <div class="camera-topbar" style="background: linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.3) 100%);">
+      <button class="icon-btn" id="btn-crop-cancel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="capture-count" data-i18n="adjustCorners">調整四角</div>
+      <button class="icon-btn" id="btn-rotate">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+    </div>
+
+    <div class="crop-hint" data-i18n="dragCorners">DRAG CORNERS TO ADJUST</div>
+
+    <div id="crop-container">
+      <canvas id="crop-canvas"></canvas>
+      <div class="corner-handle" id="handle-tl" data-corner="0"></div>
+      <div class="corner-handle" id="handle-tr" data-corner="1"></div>
+      <div class="corner-handle" id="handle-br" data-corner="2"></div>
+      <div class="corner-handle" id="handle-bl" data-corner="3"></div>
+    </div>
+
+    <div class="crop-bottombar">
+      <button class="btn-ghost" id="btn-crop-reset" data-i18n="reset">重設</button>
+      <button class="btn-accent" id="btn-crop-confirm" data-i18n="confirm">確認</button>
+    </div>
+  </section>
+
+  <!-- ============ GALLERY VIEW ============ -->
+  <section class="view" id="view-gallery">
+    <div class="topbar solid">
+      <button class="icon-btn" id="btn-gallery-back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
+      <span class="title" data-i18n="yourScans">Your Scans</span>
+      <button class="icon-btn" id="btn-add-more">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+
+    <div class="gallery-scroll" id="gallery-scroll">
+      <!-- dynamically populated -->
+    </div>
+
+    <div class="gallery-footer" id="gallery-footer" style="display:none;">
+      <button class="btn-ghost" id="btn-clear-all" data-i18n="clearAll">全部清除</button>
+      <button class="btn-accent" id="btn-open-export" data-i18n="export">匯出</button>
+    </div>
+  </section>
+
+  <!-- ============ EDIT VIEW ============ -->
+  <section class="view" id="view-edit">
+    <div class="topbar solid">
+      <button class="icon-btn" id="btn-edit-back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
+      <span class="title" data-i18n="edit">Edit</span>
+      <button class="icon-btn" id="btn-edit-delete">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+      </button>
+    </div>
+
+    <div class="edit-preview">
+      <canvas id="edit-canvas"></canvas>
+    </div>
+
+    <div class="edit-panel">
+      <div class="edit-tabs">
+        <button class="edit-tab active" data-tab="filter" data-i18n="filter">FILTER</button>
+        <button class="edit-tab" data-tab="adjust" data-i18n="adjust">ADJUST</button>
+        <button class="edit-tab" data-tab="ratio" data-i18n="ratio">RATIO</button>
+      </div>
+
+      <!-- Filter panel -->
+      <div class="edit-tab-panel" id="panel-filter">
+        <div class="filter-row" id="filter-swatches">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- Adjust panel -->
+      <div class="edit-tab-panel" id="panel-adjust" style="display:none;">
+        <div class="slider-group">
+          <label><span data-i18n="brightness">BRIGHTNESS</span><span class="val" id="val-brightness">0</span></label>
+          <input type="range" id="sl-brightness" min="-100" max="100" value="0">
+        </div>
+        <div class="slider-group">
+          <label><span data-i18n="contrast">CONTRAST</span><span class="val" id="val-contrast">0</span></label>
+          <input type="range" id="sl-contrast" min="-100" max="100" value="0">
+        </div>
+        <div class="slider-group">
+          <label><span data-i18n="sharpen">SHARPEN</span><span class="val" id="val-sharpen">0</span></label>
+          <input type="range" id="sl-sharpen" min="0" max="100" value="0">
+        </div>
+      </div>
+
+      <!-- Ratio panel -->
+      <div class="edit-tab-panel" id="panel-ratio" style="display:none;">
+        <div class="ratio-row" id="ratio-buttons">
+          <button class="ratio-btn active" data-ratio="auto">
+            <div class="r-label">AUTO</div>
+            <div class="r-sub" data-i18n="original">原始</div>
+          </button>
+          <button class="ratio-btn" data-ratio="a4">
+            <div class="r-label">A4</div>
+            <div class="r-sub">1:1.414</div>
+          </button>
+          <button class="ratio-btn" data-ratio="letter">
+            <div class="r-label">US</div>
+            <div class="r-sub">1:1.294</div>
+          </button>
+          <button class="ratio-btn" data-ratio="square">
+            <div class="r-label">1:1</div>
+            <div class="r-sub" data-i18n="square">方形</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ============ EXPORT SHEET ============ -->
+<div class="sheet-backdrop" id="sheet-backdrop"></div>
+<div class="sheet" id="export-sheet">
+  <div class="sheet-handle"></div>
+  <h3 data-i18n="exportTitle">Export</h3>
+  <div class="sheet-sub" id="export-sub" data-i18n="exportSub">選擇匯出格式</div>
+  <div class="export-opts">
+    <button class="export-opt active" data-fmt="pdf">
+      <div class="fmt-label">PDF</div>
+      <div class="fmt-desc" data-i18n="pdfDesc">存到檔案 App</div>
+    </button>
+    <button class="export-opt" data-fmt="jpg">
+      <div class="fmt-label">JPG</div>
+      <div class="fmt-desc" data-i18n="jpgDesc">存到相簿</div>
+    </button>
+  </div>
+  <button class="export-btn" id="btn-do-export">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    <span data-i18n="download">下載</span>
+  </button>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="loader-overlay" id="loader">
+  <div class="spinner"></div>
+  <div class="loader-text" id="loader-text">PROCESSING...</div>
+</div>
+
+<script>
+/* =======================================================
+   DocScan — Single-file document scanner
+   Pipeline: Camera → Edge Detect → Warp → Enhance → Export
+   ======================================================= */
+
+// ---------- STATE ----------
+const state = {
+  stream: null,
+  cvReady: false,
+  scans: [],          // [{ id, original, warped, processed, corners, settings, ratio }]
+  mode: 'auto',       // auto | manual
+  flashOn: false,
+  currentEdit: null,
+  exportFormat: 'pdf',
+  lang: 'zh',
+  edgeDetectInterval: null,
+  lastDetectedCorners: null,
+};
+
+// ---------- I18N ----------
+const i18n = {
+  zh: {
+    hero1: '掃描', hero2: '萬物',
+    heroSub: '使用手機高畫質鏡頭自動偵測文件邊緣、校正透視、調整光線,一鍵輸出 PDF 或高解析圖片。',
+    f1: '自動偵測邊緣', f2: '透視校正', f3: '亮度對比調整', f4: 'PDF 多頁輸出',
+    startScan: '開始掃描', pages: '頁',
+    modeAuto: 'AUTO', modeManual: 'MANUAL',
+    adjustCorners: '調整四角', dragCorners: '拖曳四角調整', reset: '重設', confirm: '確認',
+    yourScans: '你的掃描', clearAll: '全部清除', export: '匯出',
+    edit: '編輯', filter: 'FILTER', adjust: 'ADJUST', ratio: 'RATIO',
+    brightness: 'BRIGHTNESS', contrast: 'CONTRAST', sharpen: 'SHARPEN',
+    original: '原始', square: '方形',
+    exportTitle: '匯出', exportSub: '選擇匯出格式',
+    pdfDesc: '存到檔案 App', jpgDesc: '存到相簿', download: '下載',
+    engineReady: '引擎就緒', engineLoading: '引擎載入中...',
+    noScans: '還沒有掃描內容', noScansSub: '點右上角 + 開始掃描第一頁',
+    camErr: '無法開啟相機,請確認權限設定',
+    noEdge: '未偵測到邊緣,請手動調整',
+    saved: '已儲存',
+    filterOriginal: '原始', filterMagic: '魔法', filterBW: '黑白', filterGray: '灰階', filterColor: '彩色增強',
+    confirmDelete: '刪除這一頁?', confirmClearAll: '清除全部掃描?',
+    processing: '處理中...', warping: '校正中...', exporting: '匯出中...',
+  },
+  en: {
+    hero1: 'Scan', hero2: 'Everything',
+    heroSub: 'Auto-detect edges with your high-res camera, correct perspective, enhance lighting, and export as PDF or image.',
+    f1: 'Auto edge detect', f2: 'Perspective fix', f3: 'Brightness & contrast', f4: 'Multi-page PDF',
+    startScan: 'Start Scanning', pages: 'pages',
+    modeAuto: 'AUTO', modeManual: 'MANUAL',
+    adjustCorners: 'Adjust Corners', dragCorners: 'DRAG CORNERS TO ADJUST', reset: 'Reset', confirm: 'Confirm',
+    yourScans: 'Your Scans', clearAll: 'Clear All', export: 'Export',
+    edit: 'Edit', filter: 'FILTER', adjust: 'ADJUST', ratio: 'RATIO',
+    brightness: 'BRIGHTNESS', contrast: 'CONTRAST', sharpen: 'SHARPEN',
+    original: 'Original', square: 'Square',
+    exportTitle: 'Export', exportSub: 'Choose format',
+    pdfDesc: 'To Files app', jpgDesc: 'To Photos', download: 'Download',
+    engineReady: 'ENGINE READY', engineLoading: 'INITIALIZING ENGINE...',
+    noScans: 'No scans yet', noScansSub: 'Tap + to start scanning',
+    camErr: 'Cannot access camera. Check permissions.',
+    noEdge: 'No edges detected. Adjust manually.',
+    saved: 'Saved',
+    filterOriginal: 'Original', filterMagic: 'Magic', filterBW: 'B&W', filterGray: 'Gray', filterColor: 'Vivid',
+    confirmDelete: 'Delete this page?', confirmClearAll: 'Clear all scans?',
+    processing: 'Processing...', warping: 'Correcting...', exporting: 'Exporting...',
+  }
+};
+
+const t = (key) => i18n[state.lang][key] || key;
+
+function applyLang() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (i18n[state.lang][key]) el.textContent = i18n[state.lang][key];
+  });
+  document.getElementById('engine-status').textContent = state.cvReady ? t('engineReady') : t('engineLoading');
+}
+
+// Language toggle
+document.querySelectorAll('.lang-toggle button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.lang-toggle button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.lang = btn.dataset.lang;
+    applyLang();
+    renderGallery();
+    renderFilters();
+  });
+});
+
+// ---------- OPENCV ----------
+function onOpenCvReady() {
+  // OpenCV may fire onload before cv.Mat is available; wait for cv.onRuntimeInitialized
+  if (typeof cv === 'undefined') { setTimeout(onOpenCvReady, 100); return; }
+  if (cv.getBuildInformation) {
+    state.cvReady = true;
+    document.getElementById('engine-status').textContent = t('engineReady');
+  } else {
+    cv.onRuntimeInitialized = () => {
+      state.cvReady = true;
+      document.getElementById('engine-status').textContent = t('engineReady');
+    };
+  }
+}
+
+// ---------- VIEW ROUTING ----------
+function showView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ---------- TOAST ----------
+function toast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function setLoader(active, msg) {
+  document.getElementById('loader').classList.toggle('active', active);
+  if (msg) document.getElementById('loader-text').textContent = msg;
+}
+
+// ---------- CAMERA ----------
+async function startCamera() {
+  try {
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+      },
+      audio: false,
+    };
+    state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const video = document.getElementById('video');
+    video.srcObject = state.stream;
+    await video.play();
+    startEdgeDetection();
+  } catch (err) {
+    console.error('Camera error:', err);
+    toast(t('camErr'), 'error');
+    showView('view-welcome');
+  }
+}
+
+function stopCamera() {
+  if (state.stream) {
+    state.stream.getTracks().forEach(tr => tr.stop());
+    state.stream = null;
+  }
+  if (state.edgeDetectInterval) {
+    clearInterval(state.edgeDetectInterval);
+    state.edgeDetectInterval = null;
+  }
+}
+
+// ---------- EDGE DETECTION (live overlay) ----------
+function startEdgeDetection() {
+  if (!state.cvReady) { setTimeout(startEdgeDetection, 500); return; }
+  if (state.edgeDetectInterval) clearInterval(state.edgeDetectInterval);
+
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('edge-overlay');
+  const ctx = overlay.getContext('2d');
+
+  state.edgeDetectInterval = setInterval(() => {
+    if (state.mode !== 'auto') { ctx.clearRect(0,0,overlay.width,overlay.height); return; }
+    if (!video.videoWidth) return;
+
+    // Size overlay to match the video element's displayed size
+    const rect = video.getBoundingClientRect();
+    overlay.width = rect.width;
+    overlay.height = rect.height;
+
+    // Downscale input for speed
+    const scale = 0.25;
+    const w = Math.floor(video.videoWidth * scale);
+    const h = Math.floor(video.videoHeight * scale);
+
+    const tmp = document.createElement('canvas');
+    tmp.width = w; tmp.height = h;
+    tmp.getContext('2d').drawImage(video, 0, 0, w, h);
+
+    try {
+      const src = cv.imread(tmp);
+      const corners = detectDocumentCorners(src);
+      src.delete();
+
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (corners) {
+        state.lastDetectedCorners = corners;
+        drawCornersOnOverlay(ctx, corners, w, h, overlay.width, overlay.height);
+      } else {
+        state.lastDetectedCorners = null;
+      }
+    } catch (e) { /* swallow */ }
+  }, 250);
+}
+
+function detectDocumentCorners(src) {
+  const gray = new cv.Mat();
+  const blur = new cv.Mat();
+  const edges = new cv.Mat();
+  const contours = new cv.MatVector();
+  const hier = new cv.Mat();
+
+  try {
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+    cv.Canny(blur, edges, 75, 200);
+    // dilate to close gaps
+    const M = cv.Mat.ones(3, 3, cv.CV_8U);
+    cv.dilate(edges, edges, M);
+    M.delete();
+    cv.findContours(edges, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    let best = null;
+    let bestArea = src.rows * src.cols * 0.2; // doc must cover >20% of frame
+
+    for (let i = 0; i < contours.size(); i++) {
+      const cnt = contours.get(i);
+      const peri = cv.arcLength(cnt, true);
+      const approx = new cv.Mat();
+      cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+      if (approx.rows === 4) {
+        const area = cv.contourArea(approx);
+        if (area > bestArea) {
+          bestArea = area;
+          if (best) best.delete();
+          best = approx;
+        } else {
+          approx.delete();
+        }
+      } else {
+        approx.delete();
+      }
+      cnt.delete();
+    }
+
+    if (!best) return null;
+
+    const pts = [];
+    for (let i = 0; i < 4; i++) pts.push({ x: best.data32S[i*2], y: best.data32S[i*2+1] });
+    best.delete();
+    return orderCorners(pts);
+  } finally {
+    gray.delete(); blur.delete(); edges.delete();
+    contours.delete(); hier.delete();
+  }
+}
+
+// Order: TL, TR, BR, BL
+function orderCorners(pts) {
+  const sum = pts.map(p => p.x + p.y);
+  const diff = pts.map(p => p.x - p.y);
+  const tl = pts[sum.indexOf(Math.min(...sum))];
+  const br = pts[sum.indexOf(Math.max(...sum))];
+  const tr = pts[diff.indexOf(Math.max(...diff))];
+  const bl = pts[diff.indexOf(Math.min(...diff))];
+  return [tl, tr, br, bl];
+}
+
+function drawCornersOnOverlay(ctx, corners, srcW, srcH, dstW, dstH) {
+  // Map corners from scaled-source coordinates to displayed-video coordinates.
+  // video uses object-fit: cover. We compute the cover transform.
+  const video = document.getElementById('video');
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const fullSrcW = vw; // corners came from downscaled frame (srcW = vw * scale), but proportional to full
+  const fullSrcH = vh;
+
+  const scaleX = srcW / fullSrcW;
+  const scaleY = srcH / fullSrcH;
+
+  // Video displayed ratio cover
+  const videoRatio = vw / vh;
+  const displayRatio = dstW / dstH;
+  let drawW, drawH, offX, offY;
+  if (videoRatio > displayRatio) {
+    drawH = dstH;
+    drawW = dstH * videoRatio;
+    offX = (dstW - drawW) / 2;
+    offY = 0;
+  } else {
+    drawW = dstW;
+    drawH = dstW / videoRatio;
+    offX = 0;
+    offY = (dstH - drawH) / 2;
+  }
+
+  const mapped = corners.map(c => ({
+    x: (c.x / scaleX) / vw * drawW + offX,
+    y: (c.y / scaleY) / vh * drawH + offY,
+  }));
+
+  ctx.strokeStyle = '#ffd60a';
+  ctx.lineWidth = 3;
+  ctx.fillStyle = 'rgba(255, 214, 10, 0.15)';
+  ctx.beginPath();
+  ctx.moveTo(mapped[0].x, mapped[0].y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(mapped[i].x, mapped[i].y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Corner dots
+  mapped.forEach(p => {
+    ctx.fillStyle = '#ffd60a';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+// ---------- CAPTURE ----------
+function captureFrame() {
+  const video = document.getElementById('video');
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  // Flash animation
+  const fl = document.getElementById('flash-overlay');
+  fl.classList.add('active');
+  setTimeout(() => fl.classList.remove('active'), 150);
+
+  return canvas;
+}
+
+async function onShutter() {
+  const cap = captureFrame();
+  goToCropEditor(cap);
+}
+
+// ---------- CROP EDITOR ----------
+function goToCropEditor(sourceCanvas) {
+  state.currentEdit = {
+    sourceCanvas,
+    corners: null,
+  };
+
+  // Auto-detect corners
+  if (state.cvReady && state.mode === 'auto') {
+    try {
+      const src = cv.imread(sourceCanvas);
+      const detected = detectDocumentCorners(src);
+      src.delete();
+      if (detected) {
+        state.currentEdit.corners = detected;
+      }
+    } catch (e) { console.warn('detect failed', e); }
+  }
+
+  // Fallback: corners = image bounds
+  if (!state.currentEdit.corners) {
+    const w = sourceCanvas.width, h = sourceCanvas.height;
+    const pad = 0.08;
+    state.currentEdit.corners = [
+      { x: w*pad, y: h*pad },
+      { x: w*(1-pad), y: h*pad },
+      { x: w*(1-pad), y: h*(1-pad) },
+      { x: w*pad, y: h*(1-pad) },
+    ];
+  }
+
+  showView('view-crop');
+  setTimeout(renderCropEditor, 50);
+}
+
+function renderCropEditor() {
+  const container = document.getElementById('crop-container');
+  const canvas = document.getElementById('crop-canvas');
+  const src = state.currentEdit.sourceCanvas;
+
+  // Fit canvas into container
+  const maxW = container.clientWidth - 40;
+  const maxH = container.clientHeight - 40;
+  const ratio = Math.min(maxW / src.width, maxH / src.height);
+  const displayW = src.width * ratio;
+  const displayH = src.height * ratio;
+
+  canvas.width = src.width;
+  canvas.height = src.height;
+  canvas.style.width = displayW + 'px';
+  canvas.style.height = displayH + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(src, 0, 0);
+
+  // Draw outline in source-coord space; use strokeStyle based on zoom
+  ctx.strokeStyle = '#ffd60a';
+  ctx.lineWidth = Math.max(2, 3 / ratio);
+  ctx.fillStyle = 'rgba(255, 214, 10, 0.12)';
+  const c = state.currentEdit.corners;
+  ctx.beginPath();
+  ctx.moveTo(c[0].x, c[0].y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(c[i].x, c[i].y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Position handles
+  state.currentEdit.displayRatio = ratio;
+  state.currentEdit.displayW = displayW;
+  state.currentEdit.displayH = displayH;
+  const canvasRect = canvas.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  const offsetX = canvasRect.left - containerRect.left;
+  const offsetY = canvasRect.top - containerRect.top;
+
+  ['handle-tl', 'handle-tr', 'handle-br', 'handle-bl'].forEach((id, i) => {
+    const h = document.getElementById(id);
+    h.style.left = (offsetX + c[i].x * ratio) + 'px';
+    h.style.top  = (offsetY + c[i].y * ratio) + 'px';
+  });
+}
+
+// Drag handles
+let dragIdx = -1;
+function setupHandleDrag() {
+  document.querySelectorAll('.corner-handle').forEach(h => {
+    h.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      dragIdx = parseInt(h.dataset.corner);
+      h.setPointerCapture(e.pointerId);
+    });
+    h.addEventListener('pointermove', e => {
+      if (dragIdx !== parseInt(h.dataset.corner)) return;
+      const canvas = document.getElementById('crop-canvas');
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / state.currentEdit.displayRatio;
+      const y = (e.clientY - rect.top) / state.currentEdit.displayRatio;
+      const src = state.currentEdit.sourceCanvas;
+      state.currentEdit.corners[dragIdx] = {
+        x: Math.max(0, Math.min(src.width, x)),
+        y: Math.max(0, Math.min(src.height, y)),
+      };
+      renderCropEditor();
+    });
+    h.addEventListener('pointerup', e => { dragIdx = -1; });
+    h.addEventListener('pointercancel', e => { dragIdx = -1; });
+  });
+}
+setupHandleDrag();
+
+document.getElementById('btn-crop-reset').addEventListener('click', () => {
+  const src = state.currentEdit.sourceCanvas;
+  state.currentEdit.corners = [
+    { x: 0, y: 0 },
+    { x: src.width, y: 0 },
+    { x: src.width, y: src.height },
+    { x: 0, y: src.height },
+  ];
+  renderCropEditor();
+});
+
+document.getElementById('btn-rotate').addEventListener('click', () => {
+  const src = state.currentEdit.sourceCanvas;
+  const rotated = document.createElement('canvas');
+  rotated.width = src.height;
+  rotated.height = src.width;
+  const ctx = rotated.getContext('2d');
+  ctx.translate(rotated.width, 0);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(src, 0, 0);
+  state.currentEdit.sourceCanvas = rotated;
+  // Rotate corners too (90° clockwise)
+  state.currentEdit.corners = state.currentEdit.corners.map(c => ({
+    x: src.height - c.y,
+    y: c.x,
+  }));
+  state.currentEdit.corners = orderCorners(state.currentEdit.corners);
+  renderCropEditor();
+});
+
+document.getElementById('btn-crop-cancel').addEventListener('click', () => {
+  state.currentEdit = null;
+  showView('view-camera');
+});
+
+document.getElementById('btn-crop-confirm').addEventListener('click', async () => {
+  setLoader(true, t('warping'));
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const warped = warpPerspective(state.currentEdit.sourceCanvas, state.currentEdit.corners);
+    const scan = {
+      id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      original: state.currentEdit.sourceCanvas,
+      warped,
+      processed: warped,
+      settings: { filter: 'original', brightness: 0, contrast: 0, sharpen: 0 },
+      ratio: 'auto',
+    };
+    state.scans.push(scan);
+    updateCaptureCount();
+    updateGalleryThumb();
+    setLoader(false);
+    state.currentEdit = null;
+    showView('view-camera');
+  } catch (e) {
+    console.error(e);
+    setLoader(false);
+    toast('Error: ' + e.message, 'error');
+  }
+});
+
+// ---------- PERSPECTIVE WARP ----------
+function warpPerspective(sourceCanvas, corners) {
+  if (!state.cvReady) {
+    // Fallback: return original
+    return sourceCanvas;
+  }
+  const src = cv.imread(sourceCanvas);
+  const ordered = orderCorners(corners.map(c => ({ x: c.x, y: c.y })));
+
+  // Compute target dimensions from side lengths
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const widthTop = dist(ordered[0], ordered[1]);
+  const widthBottom = dist(ordered[3], ordered[2]);
+  const heightLeft = dist(ordered[0], ordered[3]);
+  const heightRight = dist(ordered[1], ordered[2]);
+  const destW = Math.max(widthTop, widthBottom);
+  const destH = Math.max(heightLeft, heightRight);
+
+  const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    ordered[0].x, ordered[0].y,
+    ordered[1].x, ordered[1].y,
+    ordered[2].x, ordered[2].y,
+    ordered[3].x, ordered[3].y,
+  ]);
+  const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    0, 0, destW, 0, destW, destH, 0, destH
+  ]);
+
+  const M = cv.getPerspectiveTransform(srcPts, dstPts);
+  const dst = new cv.Mat();
+  cv.warpPerspective(src, dst, M, new cv.Size(destW, destH), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar());
+
+  const out = document.createElement('canvas');
+  out.width = destW;
+  out.height = destH;
+  cv.imshow(out, dst);
+
+  src.delete(); dst.delete(); srcPts.delete(); dstPts.delete(); M.delete();
+  return out;
+}
+
+// ---------- IMAGE ENHANCEMENTS ----------
+function applyEnhancements(srcCanvas, settings) {
+  const out = document.createElement('canvas');
+  out.width = srcCanvas.width;
+  out.height = srcCanvas.height;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(srcCanvas, 0, 0);
+  const img = ctx.getImageData(0, 0, out.width, out.height);
+  const d = img.data;
+
+  const b = settings.brightness || 0;         // -100..100
+  const c = (settings.contrast || 0) / 100;   // -1..1
+  const cf = (1 + c) / (1 - c);               // contrast factor
+
+  // Filter pre-processing factor
+  const filter = settings.filter || 'original';
+
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i], g = d[i+1], bl = d[i+2];
+
+    // brightness
+    r += b; g += b; bl += b;
+
+    // contrast
+    r = (r - 128) * cf + 128;
+    g = (g - 128) * cf + 128;
+    bl = (bl - 128) * cf + 128;
+
+    // filters
+    if (filter === 'bw') {
+      const avg = (r + g + bl) / 3;
+      const v = avg > 140 ? 255 : 0;
+      r = g = bl = v;
+    } else if (filter === 'gray') {
+      const v = 0.299*r + 0.587*g + 0.114*bl;
+      r = g = bl = v;
+    } else if (filter === 'magic') {
+      // Document magic: bright whites, dark blacks, saturated
+      const avg = 0.299*r + 0.587*g + 0.114*bl;
+      // Boost contrast further
+      const boost = (avg - 128) * 1.6 + 140;
+      const factor = boost / (avg + 0.01);
+      r = Math.min(255, r * factor * 1.1);
+      g = Math.min(255, g * factor * 1.05);
+      bl = Math.min(255, bl * factor * 1.05);
+    } else if (filter === 'color') {
+      // Vivid: boost saturation
+      const avg = 0.299*r + 0.587*g + 0.114*bl;
+      r = avg + (r - avg) * 1.6;
+      g = avg + (g - avg) * 1.6;
+      bl = avg + (bl - avg) * 1.6;
+    }
+
+    d[i]   = Math.max(0, Math.min(255, r));
+    d[i+1] = Math.max(0, Math.min(255, g));
+    d[i+2] = Math.max(0, Math.min(255, bl));
+  }
+
+  ctx.putImageData(img, 0, 0);
+
+  // Sharpen
+  if (settings.sharpen && settings.sharpen > 0 && state.cvReady) {
+    try {
+      const src = cv.imread(out);
+      const dst = new cv.Mat();
+      const amount = settings.sharpen / 100;
+      // Unsharp mask via Gaussian blur
+      const blurred = new cv.Mat();
+      cv.GaussianBlur(src, blurred, new cv.Size(0, 0), 3);
+      cv.addWeighted(src, 1 + amount, blurred, -amount, 0, dst);
+      cv.imshow(out, dst);
+      src.delete(); dst.delete(); blurred.delete();
+    } catch (e) { console.warn('sharpen failed', e); }
+  }
+
+  // Apply ratio crop
+  if (settings.ratio && settings.ratio !== 'auto') {
+    return applyRatio(out, settings.ratio);
+  }
+
+  return out;
+}
+
+function applyRatio(srcCanvas, ratio) {
+  const ratios = { a4: 1 / 1.414, letter: 1 / 1.294, square: 1 };
+  const targetRatio = ratios[ratio];
+  if (!targetRatio) return srcCanvas;
+
+  const srcW = srcCanvas.width, srcH = srcCanvas.height;
+  const currentRatio = srcW / srcH;
+
+  let cropW, cropH, offX, offY;
+  if (currentRatio > targetRatio) {
+    // too wide
+    cropH = srcH;
+    cropW = srcH * targetRatio;
+    offX = (srcW - cropW) / 2;
+    offY = 0;
+  } else {
+    cropW = srcW;
+    cropH = srcW / targetRatio;
+    offX = 0;
+    offY = (srcH - cropH) / 2;
+  }
+
+  const out = document.createElement('canvas');
+  out.width = cropW;
+  out.height = cropH;
+  out.getContext('2d').drawImage(srcCanvas, offX, offY, cropW, cropH, 0, 0, cropW, cropH);
+  return out;
+}
+
+// ---------- COUNTERS & GALLERY THUMB ----------
+function updateCaptureCount() {
+  document.querySelector('#capture-count span').textContent = state.scans.length;
+}
+
+function updateGalleryThumb() {
+  const btn = document.getElementById('btn-gallery-preview');
+  if (state.scans.length === 0) {
+    btn.classList.remove('has-thumb');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+  } else {
+    const last = state.scans[state.scans.length - 1];
+    btn.classList.add('has-thumb');
+    btn.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = last.processed.toDataURL('image/jpeg', 0.7);
+    btn.appendChild(img);
+  }
+}
+
+// ---------- GALLERY VIEW ----------
+function renderGallery() {
+  const wrap = document.getElementById('gallery-scroll');
+  const footer = document.getElementById('gallery-footer');
+
+  if (state.scans.length === 0) {
+    wrap.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </div>
+        <h3>${t('noScans')}</h3>
+        <p>${t('noScansSub')}</p>
+      </div>`;
+    footer.style.display = 'none';
+    return;
+  }
+
+  footer.style.display = 'flex';
+  wrap.innerHTML = `
+    <div class="gallery-header">
+      <div class="count-big">${state.scans.length}</div>
+      <div class="count-label">${t('pages')}</div>
+    </div>
+    <div class="gallery-grid">
+      ${state.scans.map((s, i) => `
+        <div class="gallery-item" data-id="${s.id}">
+          <img src="${s.processed.toDataURL('image/jpeg', 0.7)}" alt="Page ${i+1}">
+          <div class="page-num">${String(i+1).padStart(2, '0')}</div>
+          <button class="delete-btn" data-del="${s.id}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      `).join('')}
+    </div>`;
+
+  // Bind clicks
+  wrap.querySelectorAll('.gallery-item').forEach(item => {
+    item.addEventListener('click', e => {
+      if (e.target.closest('.delete-btn')) return;
+      const id = item.dataset.id;
+      openEditor(id);
+    });
+  });
+  wrap.querySelectorAll('.delete-btn').forEach(b => {
+    b.addEventListener('click', e => {
+      e.stopPropagation();
+      const id = b.dataset.del;
+      if (confirm(t('confirmDelete'))) {
+        state.scans = state.scans.filter(s => s.id !== id);
+        renderGallery();
+        updateCaptureCount();
+        updateGalleryThumb();
+      }
+    });
+  });
+}
+
+// ---------- EDITOR VIEW ----------
+let editingId = null;
+function openEditor(id) {
+  editingId = id;
+  const scan = state.scans.find(s => s.id === id);
+  if (!scan) return;
+
+  // Populate UI state
+  document.getElementById('sl-brightness').value = scan.settings.brightness;
+  document.getElementById('sl-contrast').value = scan.settings.contrast;
+  document.getElementById('sl-sharpen').value = scan.settings.sharpen;
+  document.getElementById('val-brightness').textContent = scan.settings.brightness;
+  document.getElementById('val-contrast').textContent = scan.settings.contrast;
+  document.getElementById('val-sharpen').textContent = scan.settings.sharpen;
+
+  document.querySelectorAll('.ratio-btn').forEach(b => b.classList.toggle('active', b.dataset.ratio === scan.ratio));
+
+  renderFilters();
+  document.querySelectorAll('#filter-swatches .filter-swatch').forEach(s => {
+    s.classList.toggle('active', s.dataset.filter === scan.settings.filter);
+  });
+
+  // Default tab
+  switchTab('filter');
+
+  showView('view-edit');
+  refreshEditPreview();
+}
+
+function refreshEditPreview() {
+  const scan = state.scans.find(s => s.id === editingId);
+  if (!scan) return;
+  // Use warped as source for enhancements (not processed - to allow re-application)
+  const settings = { ...scan.settings, ratio: scan.ratio };
+  const result = applyEnhancements(scan.warped, settings);
+  scan.processed = result;
+
+  const canvas = document.getElementById('edit-canvas');
+  canvas.width = result.width;
+  canvas.height = result.height;
+  canvas.getContext('2d').drawImage(result, 0, 0);
+}
+
+function renderFilters() {
+  const names = [
+    { key: 'original', label: t('filterOriginal'), char: 'Aa' },
+    { key: 'magic', label: t('filterMagic'), char: '✦' },
+    { key: 'bw', label: t('filterBW'), char: 'B' },
+    { key: 'gray', label: t('filterGray'), char: 'G' },
+    { key: 'color', label: t('filterColor'), char: 'C' },
+  ];
+  const row = document.getElementById('filter-swatches');
+  row.innerHTML = names.map(n => `
+    <div class="filter-swatch" data-filter="${n.key}">
+      <div class="filter-swatch-thumb">${n.char}</div>
+      <div class="filter-swatch-label">${n.label}</div>
+    </div>
+  `).join('');
+  row.querySelectorAll('.filter-swatch').forEach(s => {
+    s.addEventListener('click', () => {
+      row.querySelectorAll('.filter-swatch').forEach(x => x.classList.remove('active'));
+      s.classList.add('active');
+      const scan = state.scans.find(x => x.id === editingId);
+      if (scan) { scan.settings.filter = s.dataset.filter; refreshEditPreview(); }
+    });
+  });
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.edit-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('panel-filter').style.display = tab === 'filter' ? 'block' : 'none';
+  document.getElementById('panel-adjust').style.display = tab === 'adjust' ? 'block' : 'none';
+  document.getElementById('panel-ratio').style.display = tab === 'ratio' ? 'block' : 'none';
+}
+
+document.querySelectorAll('.edit-tab').forEach(b => {
+  b.addEventListener('click', () => switchTab(b.dataset.tab));
+});
+
+['sl-brightness', 'sl-contrast', 'sl-sharpen'].forEach(id => {
+  const el = document.getElementById(id);
+  const field = id.replace('sl-', '');
+  el.addEventListener('input', () => {
+    document.getElementById('val-' + field).textContent = el.value;
+    const scan = state.scans.find(x => x.id === editingId);
+    if (scan) {
+      scan.settings[field] = parseInt(el.value);
+      refreshEditPreview();
+    }
+  });
+});
+
+document.querySelectorAll('.ratio-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.ratio-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    const scan = state.scans.find(x => x.id === editingId);
+    if (scan) {
+      scan.ratio = b.dataset.ratio;
+      refreshEditPreview();
+    }
+  });
+});
+
+document.getElementById('btn-edit-back').addEventListener('click', () => {
+  editingId = null;
+  updateGalleryThumb();
+  renderGallery();
+  showView('view-gallery');
+});
+
+document.getElementById('btn-edit-delete').addEventListener('click', () => {
+  if (!confirm(t('confirmDelete'))) return;
+  state.scans = state.scans.filter(s => s.id !== editingId);
+  editingId = null;
+  updateCaptureCount();
+  updateGalleryThumb();
+  renderGallery();
+  showView('view-gallery');
+});
+
+// ---------- EXPORT ----------
+function openExportSheet() {
+  document.getElementById('sheet-backdrop').classList.add('active');
+  document.getElementById('export-sheet').classList.add('active');
+}
+function closeExportSheet() {
+  document.getElementById('sheet-backdrop').classList.remove('active');
+  document.getElementById('export-sheet').classList.remove('active');
+}
+
+document.getElementById('sheet-backdrop').addEventListener('click', closeExportSheet);
+document.querySelectorAll('.export-opt').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.export-opt').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    state.exportFormat = b.dataset.fmt;
+  });
+});
+
+document.getElementById('btn-do-export').addEventListener('click', async () => {
+  if (state.scans.length === 0) { toast('No pages', 'error'); return; }
+  closeExportSheet();
+  setLoader(true, t('exporting'));
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    if (state.exportFormat === 'pdf') {
+      exportPDF();
+    } else {
+      exportJPG();
+    }
+    setLoader(false);
+    toast(t('saved'), 'success');
+  } catch (e) {
+    console.error(e);
+    setLoader(false);
+    toast('Error: ' + e.message, 'error');
+  }
+});
+
+function exportPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 20;
+
+  state.scans.forEach((scan, i) => {
+    if (i > 0) doc.addPage();
+    const img = scan.processed;
+    const ratio = Math.min((pageW - margin*2) / img.width, (pageH - margin*2) / img.height);
+    const w = img.width * ratio;
+    const h = img.height * ratio;
+    const x = (pageW - w) / 2;
+    const y = (pageH - h) / 2;
+    const dataUrl = img.toDataURL('image/jpeg', 0.85);
+    doc.addImage(dataUrl, 'JPEG', x, y, w, h);
+  });
+
+  const filename = `DocScan-${dateStamp()}.pdf`;
+  doc.save(filename);
+}
+
+function exportJPG() {
+  // For single scan: save directly. For multiple: download each.
+  state.scans.forEach((scan, i) => {
+    const url = scan.processed.toDataURL('image/jpeg', 0.92);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `DocScan-${dateStamp()}-${String(i+1).padStart(2,'0')}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+}
+
+function dateStamp() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
+// ---------- NAVIGATION WIRING ----------
+document.getElementById('btn-start-scan').addEventListener('click', () => {
+  showView('view-camera');
+  startCamera();
+  updateCaptureCount();
+  updateGalleryThumb();
+});
+
+document.getElementById('btn-camera-back').addEventListener('click', () => {
+  stopCamera();
+  showView('view-welcome');
+});
+
+document.getElementById('btn-shutter').addEventListener('click', onShutter);
+
+document.getElementById('btn-gallery-preview').addEventListener('click', () => {
+  if (state.scans.length === 0) return;
+  stopCamera();
+  renderGallery();
+  showView('view-gallery');
+});
+
+document.getElementById('btn-done').addEventListener('click', () => {
+  if (state.scans.length === 0) { toast('No pages yet', 'error'); return; }
+  stopCamera();
+  renderGallery();
+  showView('view-gallery');
+});
+
+document.getElementById('btn-gallery-back').addEventListener('click', () => {
+  showView('view-camera');
+  startCamera();
+});
+
+document.getElementById('btn-add-more').addEventListener('click', () => {
+  showView('view-camera');
+  startCamera();
+});
+
+document.getElementById('btn-clear-all').addEventListener('click', () => {
+  if (!confirm(t('confirmClearAll'))) return;
+  state.scans = [];
+  renderGallery();
+  updateCaptureCount();
+  updateGalleryThumb();
+});
+
+document.getElementById('btn-open-export').addEventListener('click', openExportSheet);
+
+// Mode toggle
+document.querySelectorAll('.mode-pill button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.mode-pill button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    state.mode = b.dataset.mode;
+  });
+});
+
+// Flash toggle (torch)
+document.getElementById('btn-toggle-flash').addEventListener('click', async () => {
+  if (!state.stream) return;
+  const track = state.stream.getVideoTracks()[0];
+  const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+  if (!capabilities.torch) { toast('Torch not supported'); return; }
+  state.flashOn = !state.flashOn;
+  try {
+    await track.applyConstraints({ advanced: [{ torch: state.flashOn }] });
+    document.getElementById('btn-toggle-flash').style.background = state.flashOn ? 'var(--accent-soft)' : '';
+  } catch (e) { toast('Torch error'); }
+});
+
+// ---------- INIT ----------
+applyLang();
+renderFilters();
+
+// Prevent double-tap zoom on iOS
+let lastTouch = 0;
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouch < 300) e.preventDefault();
+  lastTouch = now;
+}, { passive: false });
+
+</script>
+</body>
+</html>
