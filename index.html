@@ -1127,16 +1127,22 @@ document.querySelectorAll('.lang-toggle button').forEach(btn => {
 
 // ---------- OPENCV ----------
 function onOpenCvReady() {
-  // OpenCV may fire onload before cv.Mat is available; wait for cv.onRuntimeInitialized
+  // OpenCV may fire onload before runtime initialized.
+  // The reliable readiness check is whether cv.Mat is an actual constructor.
   if (typeof cv === 'undefined') { setTimeout(onOpenCvReady, 100); return; }
-  if (cv.getBuildInformation) {
+  const markReady = () => {
     state.cvReady = true;
     document.getElementById('engine-status').textContent = t('engineReady');
+  };
+  if (typeof cv.Mat === 'function') {
+    markReady();
+  } else if (cv.onRuntimeInitialized !== undefined) {
+    cv.onRuntimeInitialized = markReady;
   } else {
-    cv.onRuntimeInitialized = () => {
-      state.cvReady = true;
-      document.getElementById('engine-status').textContent = t('engineReady');
-    };
+    // Poll fallback
+    const poll = setInterval(() => {
+      if (typeof cv.Mat === 'function') { clearInterval(poll); markReady(); }
+    }, 150);
   }
 }
 
@@ -1247,6 +1253,7 @@ function startEdgeDetection() {
       src.delete();
 
       ctx.clearRect(0, 0, overlay.width, overlay.height);
+      drawViewfinderBrackets(ctx, overlay.width, overlay.height);
       if (corners) {
         state.lastDetectedCorners = corners;
         drawCornersOnOverlay(ctx, corners, w, h, overlay.width, overlay.height);
@@ -1255,7 +1262,7 @@ function startEdgeDetection() {
         state.lastDetectedCorners = null;
         setScanStatus('searching');
       }
-    } catch (e) { /* swallow */ }
+    } catch (e) { console.warn('detect loop error', e); }
   }, 250);
 }
 
@@ -1329,19 +1336,39 @@ function orderCorners(pts) {
   return [tl, tr, br, bl];
 }
 
+function drawViewfinderBrackets(ctx, dstW, dstH) {
+  // Decorative corner brackets always visible — shows system is active
+  const inset = Math.min(dstW, dstH) * 0.08;
+  const len = Math.min(dstW, dstH) * 0.06;
+  const corners = [
+    [inset, inset],                  // TL
+    [dstW - inset, inset],           // TR
+    [dstW - inset, dstH - inset],    // BR
+    [inset, dstH - inset],           // BL
+  ];
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  corners.forEach(([x, y], i) => {
+    const dx = i === 0 || i === 3 ? len : -len;
+    const dy = i === 0 || i === 1 ? len : -len;
+    ctx.beginPath();
+    ctx.moveTo(x + dx, y);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x, y + dy);
+    ctx.stroke();
+  });
+}
+
 function drawCornersOnOverlay(ctx, corners, srcW, srcH, dstW, dstH) {
   // Map corners from scaled-source coordinates to displayed-video coordinates.
   // video uses object-fit: cover. We compute the cover transform.
   const video = document.getElementById('video');
   const vw = video.videoWidth;
   const vh = video.videoHeight;
-  const fullSrcW = vw; // corners came from downscaled frame (srcW = vw * scale), but proportional to full
-  const fullSrcH = vh;
+  const scaleX = srcW / vw;
+  const scaleY = srcH / vh;
 
-  const scaleX = srcW / fullSrcW;
-  const scaleY = srcH / fullSrcH;
-
-  // Video displayed ratio cover
   const videoRatio = vw / vh;
   const displayRatio = dstW / dstH;
   let drawW, drawH, offX, offY;
@@ -1362,22 +1389,46 @@ function drawCornersOnOverlay(ctx, corners, srcW, srcH, dstW, dstH) {
     y: (c.y / scaleY) / vh * drawH + offY,
   }));
 
+  // Glow layer
+  ctx.save();
+  ctx.shadowColor = 'rgba(255, 214, 10, 0.9)';
+  ctx.shadowBlur = 18;
   ctx.strokeStyle = '#ffd60a';
-  ctx.lineWidth = 3;
-  ctx.fillStyle = 'rgba(255, 214, 10, 0.15)';
+  ctx.lineWidth = 4;
+  ctx.lineJoin = 'round';
+  ctx.fillStyle = 'rgba(255, 214, 10, 0.18)';
   ctx.beginPath();
   ctx.moveTo(mapped[0].x, mapped[0].y);
   for (let i = 1; i < 4; i++) ctx.lineTo(mapped[i].x, mapped[i].y);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
+  ctx.restore();
 
-  // Corner dots
-  mapped.forEach(p => {
-    ctx.fillStyle = '#ffd60a';
+  // L-shaped corner markers
+  const armLen = Math.min(dstW, dstH) * 0.05;
+  ctx.strokeStyle = '#ffd60a';
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 4; i++) {
+    const p = mapped[i];
+    const next = mapped[(i + 1) % 4];
+    const prev = mapped[(i + 3) % 4];
+    const a1 = Math.atan2(next.y - p.y, next.x - p.x);
+    const a2 = Math.atan2(prev.y - p.y, prev.x - p.x);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(p.x + Math.cos(a1) * armLen, p.y + Math.sin(a1) * armLen);
+    ctx.lineTo(p.x, p.y);
+    ctx.lineTo(p.x + Math.cos(a2) * armLen, p.y + Math.sin(a2) * armLen);
+    ctx.stroke();
+  }
+
+  // Center dots
+  mapped.forEach(p => {
+    ctx.fillStyle = '#0a0a0a';
+    ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd60a';
+    ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
   });
 }
 
