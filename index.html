@@ -1359,10 +1359,20 @@ function scoreQuad(ordered, frameArea) {
   angleDev /= 4;
   if (angleDev > 35) return -1;
 
-  // Combined score: bigger area, closer to rectangular, more balanced sides
-  const angleScore = 1 - angleDev / 45;        // 0..1
-  const balanceScore = 0.4 + sideRatio * 0.6;  // 0.4..1
-  return area * angleScore * balanceScore;
+  // Aspect ratio bonus: prefer paper-like proportions (A4=1.414, Letter=1.294)
+  const widthAvg = (sides[0] + sides[2]) / 2;
+  const heightAvg = (sides[1] + sides[3]) / 2;
+  const aspect = Math.max(widthAvg, heightAvg) / Math.min(widthAvg, heightAvg);
+  let aspectBonus;
+  if (aspect >= 1.25 && aspect <= 1.55) aspectBonus = 1.6;       // A4/Letter sweet spot
+  else if (aspect >= 1.05 && aspect <= 1.85) aspectBonus = 1.2;  // generic paper
+  else if (aspect <= 2.2) aspectBonus = 0.9;
+  else aspectBonus = 0.5;                                         // very elongated
+
+  // Combined score
+  const angleScore = 1 - angleDev / 45;
+  const balanceScore = 0.4 + sideRatio * 0.6;
+  return area * angleScore * balanceScore * aspectBonus;
 }
 
 function detectDocumentCorners(src) {
@@ -1552,15 +1562,20 @@ function goToCropEditor(sourceCanvas) {
     corners: null,
   };
 
-  // Auto-detect corners (always try, regardless of mode)
-  if (state.cvReady) {
+  // Prefer live-smoothed corners (what user just saw on the viewfinder).
+  // They're stored in downscaled tmp coords (0.25× video); map to full-res.
+  if (state.smoothedCorners) {
+    const k = 1 / 0.25;
+    state.currentEdit.corners = state.smoothedCorners.map(c => ({
+      x: c.x * k, y: c.y * k,
+    }));
+  } else if (state.cvReady) {
+    // Fallback: fresh detection on the captured full-res frame
     try {
       const src = cv.imread(sourceCanvas);
       const detected = detectDocumentCorners(src);
       src.delete();
-      if (detected) {
-        state.currentEdit.corners = detected;
-      }
+      if (detected) state.currentEdit.corners = detected;
     } catch (e) { console.warn('detect failed', e); }
   }
 
@@ -1605,11 +1620,25 @@ function renderCropEditor() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(src, 0, 0);
 
-  // Draw outline in source-coord space; use strokeStyle based on zoom
+  const c = state.currentEdit.corners;
+
+  // Dark mask everywhere EXCEPT inside the polygon (highlights document)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, canvas.width, canvas.height);
+  ctx.moveTo(c[0].x, c[0].y);
+  ctx.lineTo(c[3].x, c[3].y);
+  ctx.lineTo(c[2].x, c[2].y);
+  ctx.lineTo(c[1].x, c[1].y);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
+  ctx.fill('evenodd');
+  ctx.restore();
+
+  // Polygon outline
   ctx.strokeStyle = '#ffd60a';
   ctx.lineWidth = Math.max(2, 3 / ratio);
-  ctx.fillStyle = 'rgba(255, 214, 10, 0.12)';
-  const c = state.currentEdit.corners;
+  ctx.fillStyle = 'rgba(255, 214, 10, 0.08)';
   ctx.beginPath();
   ctx.moveTo(c[0].x, c[0].y);
   for (let i = 1; i < 4; i++) ctx.lineTo(c[i].x, c[i].y);
@@ -1783,8 +1812,19 @@ function warpPerspective(sourceCanvas, corners) {
   const widthBottom = dist(ordered[3], ordered[2]);
   const heightLeft = dist(ordered[0], ordered[3]);
   const heightRight = dist(ordered[1], ordered[2]);
-  const destW = Math.max(widthTop, widthBottom);
-  const destH = Math.max(heightLeft, heightRight);
+  let destW = Math.max(widthTop, widthBottom);
+  let destH = Math.max(heightLeft, heightRight);
+
+  // Snap to standard paper aspect if very close (corrects minor corner errors)
+  const aspect = Math.max(destW, destH) / Math.min(destW, destH);
+  const portrait = destH >= destW;
+  let target = null;
+  if (Math.abs(aspect - 1.414) < 0.08) target = 1.414;       // A4
+  else if (Math.abs(aspect - 1.294) < 0.06) target = 1.294;  // Letter
+  if (target) {
+    if (portrait) destH = destW * target;
+    else destW = destH * target;
+  }
 
   const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
     ordered[0].x, ordered[0].y,
