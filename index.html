@@ -293,7 +293,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 60px 20px 180px;
+    padding: calc(var(--safe-top) + 60px) 20px 140px;
   }
   #crop-canvas {
     max-width: 100%;
@@ -325,25 +325,39 @@
     padding: 16px 16px calc(var(--safe-bottom) + 16px);
     background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.9) 50%);
     display: flex;
-    gap: 12px;
+    gap: 10px;
     z-index: 20;
+    align-items: center;
   }
   .crop-bottombar button {
-    flex: 1;
     padding: 14px;
     border-radius: 12px;
     font-weight: 500;
     font-size: 15px;
     transition: transform 0.1s;
   }
-  .crop-bottombar button:active { transform: scale(0.97); }
+  .crop-bottombar .btn-ghost, .crop-bottombar .btn-accent { flex: 1; }
+  .crop-bottombar button:active { transform: scale(0.94); }
+  .crop-icon-btn {
+    width: 48px; height: 48px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #fff;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+  .crop-icon-btn svg { width: 20px; height: 20px; }
+  .crop-icon-btn.danger { color: var(--danger); }
   .btn-ghost { background: var(--bg-raised); color: var(--text); border: 1px solid var(--border); }
   .btn-accent { background: var(--accent); color: #0a0a0a; font-weight: 600; }
   .crop-hint {
     position: absolute;
-    top: calc(var(--safe-top) + 70px);
+    top: calc(var(--safe-top) + 18px);
     left: 50%;
     transform: translateX(-50%);
+    z-index: 15;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     letter-spacing: 1.5px;
@@ -852,16 +866,6 @@
 
   <!-- ============ CROP EDITOR VIEW ============ -->
   <section class="view" id="view-crop">
-    <div class="camera-topbar" style="background: linear-gradient(180deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.3) 100%);">
-      <button class="icon-btn" id="btn-crop-cancel">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-      <div class="capture-count" data-i18n="adjustCorners">調整四角</div>
-      <button class="icon-btn" id="btn-rotate">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-      </button>
-    </div>
-
     <div class="crop-hint" data-i18n="dragCorners">DRAG CORNERS TO ADJUST</div>
 
     <div id="crop-container">
@@ -873,6 +877,12 @@
     </div>
 
     <div class="crop-bottombar">
+      <button class="crop-icon-btn danger" id="btn-crop-cancel" aria-label="Discard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+      <button class="crop-icon-btn" id="btn-rotate" aria-label="Rotate">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
       <button class="btn-ghost" id="btn-crop-reset" data-i18n="reset">重設</button>
       <button class="btn-accent" id="btn-crop-confirm" data-i18n="confirm">確認</button>
     </div>
@@ -1034,7 +1044,7 @@ const i18n = {
     brightness: 'BRIGHTNESS', contrast: 'CONTRAST', sharpen: 'SHARPEN',
     original: '原始', square: '方形',
     exportTitle: '匯出', exportSub: '選擇匯出格式',
-    pdfDesc: '存到檔案 App', jpgDesc: '存到相簿', download: '下載',
+    pdfDesc: '存到檔案 App', jpgDesc: '分享 → 儲存影像', download: '下載',
     engineReady: '引擎就緒', engineLoading: '引擎載入中...',
     noScans: '還沒有掃描內容', noScansSub: '點右上角 + 開始掃描第一頁',
     camErr: '無法開啟相機,請確認權限設定',
@@ -1056,7 +1066,7 @@ const i18n = {
     brightness: 'BRIGHTNESS', contrast: 'CONTRAST', sharpen: 'SHARPEN',
     original: 'Original', square: 'Square',
     exportTitle: 'Export', exportSub: 'Choose format',
-    pdfDesc: 'To Files app', jpgDesc: 'To Photos', download: 'Download',
+    pdfDesc: 'To Files app', jpgDesc: 'Share → Save Image', download: 'Download',
     engineReady: 'ENGINE READY', engineLoading: 'INITIALIZING ENGINE...',
     noScans: 'No scans yet', noScansSub: 'Tap + to start scanning',
     camErr: 'Cannot access camera. Check permissions.',
@@ -1219,24 +1229,28 @@ function detectDocumentCorners(src) {
     cv.findContours(edges, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
     let best = null;
-    let bestArea = src.rows * src.cols * 0.2; // doc must cover >20% of frame
+    let bestArea = src.rows * src.cols * 0.12; // doc must cover >12% of frame
 
     for (let i = 0; i < contours.size(); i++) {
       const cnt = contours.get(i);
       const peri = cv.arcLength(cnt, true);
-      const approx = new cv.Mat();
-      cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
-      if (approx.rows === 4) {
+      // Try multiple epsilon values — some docs need looser approximation
+      let approx = null;
+      for (const eps of [0.02, 0.03, 0.04]) {
+        const a = new cv.Mat();
+        cv.approxPolyDP(cnt, a, eps * peri, true);
+        if (a.rows === 4) { approx = a; break; }
+        a.delete();
+      }
+      if (approx) {
         const area = cv.contourArea(approx);
-        if (area > bestArea) {
+        if (area > bestArea && cv.isContourConvex(approx)) {
           bestArea = area;
           if (best) best.delete();
           best = approx;
         } else {
           approx.delete();
         }
-      } else {
-        approx.delete();
       }
       cnt.delete();
     }
@@ -1344,8 +1358,8 @@ function goToCropEditor(sourceCanvas) {
     corners: null,
   };
 
-  // Auto-detect corners
-  if (state.cvReady && state.mode === 'auto') {
+  // Auto-detect corners (always try, regardless of mode)
+  if (state.cvReady) {
     try {
       const src = cv.imread(sourceCanvas);
       const detected = detectDocumentCorners(src);
@@ -1889,7 +1903,7 @@ document.getElementById('btn-do-export').addEventListener('click', async () => {
     if (state.exportFormat === 'pdf') {
       exportPDF();
     } else {
-      exportJPG();
+      await exportJPG();
     }
     setLoader(false);
     toast(t('saved'), 'success');
@@ -1923,16 +1937,44 @@ function exportPDF() {
   doc.save(filename);
 }
 
-function exportJPG() {
-  // For single scan: save directly. For multiple: download each.
-  state.scans.forEach((scan, i) => {
-    const url = scan.processed.toDataURL('image/jpeg', 0.92);
+async function exportJPG() {
+  const stamp = dateStamp();
+  // Build File objects from each scan
+  const files = await Promise.all(state.scans.map((scan, i) => new Promise(res => {
+    scan.processed.toBlob(
+      blob => res(new File([blob], `DocScan-${stamp}-${String(i+1).padStart(2,'0')}.jpg`, { type: 'image/jpeg' })),
+      'image/jpeg', 0.92
+    );
+  })));
+
+  // Prefer native share sheet (iOS Safari: "儲存影像" → Photos album)
+  if (navigator.canShare && navigator.canShare({ files })) {
+    try {
+      await navigator.share({ files, title: 'DocScan' });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return; // user cancelled
+      console.warn('share failed, falling back', e);
+    }
+  }
+
+  // Fallback: open each image in a new tab so user can long-press → 儲存影像
+  if (files.length === 1) {
+    const url = URL.createObjectURL(files[0]);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return;
+  }
+  // Multi-page fallback: sequential downloads
+  files.forEach(f => {
+    const url = URL.createObjectURL(f);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `DocScan-${dateStamp()}-${String(i+1).padStart(2,'0')}.jpg`;
+    a.download = f.name;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
 }
 
