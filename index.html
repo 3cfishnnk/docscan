@@ -1428,14 +1428,13 @@ function detectDocumentCorners(src) {
 }
 
 // Order: TL, TR, BR, BL
+// Two-pass: split by Y (top vs bottom half), then by X within each half.
+// Robust to document rotation up to ~45° (beyond which top/bottom are ambiguous).
 function orderCorners(pts) {
-  const sum = pts.map(p => p.x + p.y);
-  const diff = pts.map(p => p.x - p.y);
-  const tl = pts[sum.indexOf(Math.min(...sum))];
-  const br = pts[sum.indexOf(Math.max(...sum))];
-  const tr = pts[diff.indexOf(Math.max(...diff))];
-  const bl = pts[diff.indexOf(Math.min(...diff))];
-  return [tl, tr, br, bl];
+  const byY = pts.slice().sort((a, b) => a.y - b.y);
+  const top = byY.slice(0, 2).sort((a, b) => a.x - b.x);    // [TL, TR]
+  const bot = byY.slice(2, 4).sort((a, b) => a.x - b.x);    // [BL, BR]
+  return [top[0], top[1], bot[1], bot[0]];                   // TL, TR, BR, BL
 }
 
 function drawViewfinderBrackets(ctx, dstW, dstH) {
@@ -1829,6 +1828,11 @@ function recoverRectAspect(corners, imgW, imgH) {
   if (Math.abs(n2[2]) < 1e-9 || Math.abs(n3[2]) < 1e-9) return null;
   const f_sq = -(n2[0]*n3[0] + n2[1]*n3[1]) / (n2[2]*n3[2]);
   if (!isFinite(f_sq) || f_sq <= 0) return null;
+  // Sanity: phone focal length in pixels typically falls in [0.5·imgW, 3·imgW]
+  const fMin = 0.3 * Math.max(imgW, imgH);
+  const fMax = 4.0 * Math.max(imgW, imgH);
+  const f = Math.sqrt(f_sq);
+  if (f < fMin || f > fMax) return null;
 
   // aspect² (width/height squared)
   const w_sq = n2[0]*n2[0] + n2[1]*n2[1] + f_sq*n2[2]*n2[2];
@@ -1866,10 +1870,11 @@ function warpPerspective(sourceCanvas, corners) {
     let ar = trueAspect; // width/height
     const inv = 1 / ar;
     const A4 = 1 / 1.414, LETTER = 1 / 1.294;
-    if (Math.abs(ar - 1.414) < 0.18) ar = 1.414;
-    else if (Math.abs(inv - 1.414) < 0.18) ar = A4;
-    else if (Math.abs(ar - 1.294) < 0.10) ar = 1.294;
-    else if (Math.abs(inv - 1.294) < 0.10) ar = LETTER;
+    // Wider snap windows — angled shots have larger aspect-recovery noise
+    if (Math.abs(ar - 1.414) < 0.25) ar = 1.414;
+    else if (Math.abs(inv - 1.414) < 0.25) ar = A4;
+    else if (Math.abs(ar - 1.294) < 0.12) ar = 1.294;
+    else if (Math.abs(inv - 1.294) < 0.12) ar = LETTER;
 
     // Use the longer measured side as the high-fidelity dimension; compute the
     // other from the recovered aspect so we never undersize either axis.
@@ -1889,8 +1894,8 @@ function warpPerspective(sourceCanvas, corners) {
     const aspect = Math.max(destW, destH) / Math.min(destW, destH);
     const portrait = destH >= destW;
     let target = null;
-    if (Math.abs(aspect - 1.414) < 0.20) target = 1.414;
-    else if (Math.abs(aspect - 1.294) < 0.10) target = 1.294;
+    if (Math.abs(aspect - 1.414) < 0.28) target = 1.414;
+    else if (Math.abs(aspect - 1.294) < 0.12) target = 1.294;
     if (target) {
       if (portrait) destH = destW * target;
       else destW = destH * target;
